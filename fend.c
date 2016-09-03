@@ -19,12 +19,22 @@
 #include "syscallents.h"
 #include <assert.h>
 #include <limits.h>
+#include <fcntl.h>
 
 /* Macros */
 
 #define PERM_DENIED (-EACCES)
 #define offsetof(a, b) __builtin_offsetof(a,b)
 #define get_reg(child, name) __get_reg(child, offsetof(struct user, regs.name))
+
+\
+// globals
+
+// 0 indicates entry and 1 indicates exit
+int syscall_flag = 0;
+
+// saved is edited out part of string
+char *saved =  NULL;
 
 long __get_reg(pid_t child, int off) {
     long val = ptrace(PTRACE_PEEKUSER, child, off);
@@ -44,80 +54,10 @@ struct file_permissions {
     int execf;
 };
 
-struct sandb_syscall {
-  int syscall;
-  void (*callback)(struct sandbox*, struct user_regs_struct *regs);
-  char name[10];
-};
+
+
 
 /* call numbers are in usr/include/x86_64-linux-gnu/asm/unistd_64.h */
-
-struct sandb_syscall sandb_syscalls[] = {
-  {__NR_read,            NULL, "read"    },
-  {__NR_write,           NULL, "write"   },
-  {__NR_exit,            NULL, "exit"    },
-  {__NR_brk,             NULL, "brk"     },
-  {__NR_mmap,            NULL, "mmap"    },
-  {__NR_access,          NULL, "access"  },
-  {__NR_open,            NULL, "open"    },
-  {__NR_fstat,           NULL, "fstat"   },
-  {__NR_close,           NULL, "close"   },
-  {__NR_mprotect,        NULL, "mprotect"},
-  {__NR_munmap,          NULL, "munmap"  },
-  {__NR_arch_prctl,      NULL, "arch"    },
-  {__NR_exit_group,      NULL, "exit_grp"},
-  {__NR_getdents,        NULL, "getdent" },
-};
-
-/*
-struct sandb_syscall sandb_readcalls[] = {
-  {__NR_read,            NULL, "read"    },
-  {__NR_write,           NULL, "write"   },
-  {__NR_brk,             NULL, "brk"     },
-  {__NR_mmap,            NULL, "mmap"    },
-  {__NR_access,          NULL, "access"  },
-  {__NR_open,            NULL, "open"    },
-  {__NR_fstat,           NULL, "fstat"   },
-  {__NR_close,           NULL, "close"   },
-  {__NR_mprotect,        NULL, "mprotect"},
-  {__NR_munmap,          NULL, "munmap"  },
-  {__NR_arch_prctl,      NULL, "arch"    },
-  {__NR_exit_group,      NULL, "exit_grp"},
-  {__NR_getdents,        NULL, "getdent" },
-};
-struct sandb_syscall sandb_writecalls[] = {
-  {__NR_read,            NULL, "read"    },
-  {__NR_write,           NULL, "write"   },
-  {__NR_brk,             NULL, "brk"     },
-  {__NR_mmap,            NULL, "mmap"    },
-  {__NR_access,          NULL, "access"  },
-  {__NR_open,            NULL, "open"    },
-  {__NR_fstat,           NULL, "fstat"   },
-  {__NR_close,           NULL, "close"   },
-  {__NR_mprotect,        NULL, "mprotect"},
-  {__NR_munmap,          NULL, "munmap"  },
-  {__NR_arch_prctl,      NULL, "arch"    },
-  {__NR_exit_group,      NULL, "exit_grp"},
-  {__NR_getdents,        NULL, "getdent" },
-};
-
-struct sandb_syscall sandb_execcalls[] = {
-  {__NR_read,            NULL, "read"    },
-  {__NR_write,           NULL, "write"   },
-  {__NR_brk,             NULL, "brk"     },
-  {__NR_mmap,            NULL, "mmap"    },
-  {__NR_access,          NULL, "access"  },
-  {__NR_open,            NULL, "open"    },
-  {__NR_fstat,           NULL, "fstat"   },
-  {__NR_close,           NULL, "close"   },
-  {__NR_mprotect,        NULL, "mprotect"},
-  {__NR_munmap,          NULL, "munmap"  },
-  {__NR_arch_prctl,      NULL, "arch"    },
-  {__NR_exit_group,      NULL, "exit_grp"},
-  {__NR_getdents,        NULL, "getdent" },
-};
-
-*/
 
 /*
  * Referenced Code Start ::
@@ -153,7 +93,24 @@ long get_syscall_arg(pid_t child, int which) {
     }
 }
 
-char *read_string(pid_t child, unsigned long addr) {
+/* edit string adapted from http://www.linuxjournal.com/article/6100?page=0,2 */
+
+void edit_string(pid_t child, unsigned long addr, char * newstr) 
+{
+    union u {
+            long val;
+            char chars[8];
+    }data;
+
+    strncpy(data.chars, newstr, 8);
+    //data.chars[strlen(newstr)] = '\0';
+
+    ptrace(PTRACE_POKEDATA, child,
+               addr, data.val);
+    return;
+}
+char *read_string(pid_t child, unsigned long addr) 
+{
     char *val = malloc(4096);
     int allocated = 4096;
     int read = 0;
@@ -176,45 +133,61 @@ char *read_string(pid_t child, unsigned long addr) {
     return val;
 }
 
-void print_syscall_args(pid_t child, int num) {
-    struct syscall_entry *ent = NULL;
-    int nargs = SYSCALL_MAXARGS;
-    int i;
-    char *strval;
+int match_pattern(char * pattern) {
+	/* dummy for now */
+	if (strcmp(pattern, "foobar123456789123456789123456789") == 0)
+		return 1;
+    
+    return 0;
+}
 
-    if (num <= MAX_SYSCALL_NUM && syscalls[num].name) {
-        ent = &syscalls[num];
-        nargs = ent->nargs;
-    }
-    for (i = 0; i < nargs; i++) {
-        long arg = get_syscall_arg(child, i);
-        int type = ent ? ent->args[i] : ARG_PTR;
-        switch (type) {
-        case ARG_INT:
-            fprintf(stderr, "%ld", arg);
-            break;
-        case ARG_STR:
+void syscall_decode(pid_t child, int num) {
+ 
+    long arg;
+    char * strval = NULL;
+
+    switch (num) {
+   
+        case __NR_open:
+        	
+        	arg = get_syscall_arg(child, 0);
             strval = read_string(child, arg);
-            fprintf(stderr, "\"%s\"", strval);
+            //fprintf(stderr, "%s\n", strval);
+            if (!syscall_flag) {
+                if (match_pattern(strval)) {
+                	saved =(char *) calloc(9, sizeof(char));
+                	strncpy(saved, strval, 8);
+                	saved[8] = '\0';
+                	//fprintf(stderr, "%s\n", saved); 
+            	    edit_string(child, arg, "ane.c");
+            	} 
+            } else {
+
+                     if(strcmp(strval, "ane.c") == 0) {
+
+                     	edit_string(child, arg, saved);
+                     	free(saved);
+                     	//fprintf(stderr, "%s %s\n",  saved, read_string(child, arg));
+                     	if (get_reg(child, rax) != PERM_DENIED) {
+               
+                            struct user_regs_struct regs;
+                            if(ptrace(PTRACE_GETREGS, child, NULL, &regs) < 0)
+                               err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
+                         
+                            regs.rax = PERM_DENIED;
+	                     
+	                        if (ptrace(PTRACE_SETREGS, child, 0, &regs) < 0) 
+	                      	    err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
+                        }
+
+                     } 
+            }
             free(strval);
             break;
         default:
-            fprintf(stderr, "0x%lx", arg);
             break;
-        }
-        if (i != nargs - 1)
-            fprintf(stderr, ", ");
     }
-}
-
-void print_syscall(pid_t child) {
-    int num;
-    num = get_reg(child, orig_rax);
-    assert(errno == 0);
-
-    fprintf(stderr, "%s(", syscall_name(num));
-    print_syscall_args(child, num);
-    fprintf(stderr, ") = \n");
+  
 }
 
 
@@ -229,44 +202,10 @@ void sandb_kill(struct sandbox *sandb) {
   exit(EXIT_FAILURE);
 }
 
-void denychild(struct sandbox *sandb, struct user_regs_struct *regs)
-{
-	regs->rax = PERM_DENIED;
-	ptrace(PTRACE_SETREGS, sandb->child, 0, regs);
-    return;
-}
-
 void sandb_handle_syscall(struct sandbox *sandb) {
-  int i;
-  struct user_regs_struct regs;
-  
-  char message[10000];
-  int j = 0;
-  long temp_long;
-  char* temp_char2 = message;
-  
-  memset(message, 0, sizeof(message));
-  if(ptrace(PTRACE_GETREGS, sandb->child, NULL, &regs) < 0)
-     err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
-  
-  print_syscall(sandb->child);
- /*
-  if (regs.orig_rax == __NR_read) {
+  int num = get_reg(sandb->child, orig_rax);
+  syscall_decode(sandb->child, num);
  
-      denychild(sandb, &regs);
-      return;
-  }
-  */
-  
-  for(i = 0; i < sizeof(sandb_syscalls)/sizeof(*sandb_syscalls); i++) {
-      if(regs.orig_rax == sandb_syscalls[i].syscall) {
-         //printf("Executed syscall %s \n",sandb_syscalls[i].name); 
-         if(sandb_syscalls[i].callback != NULL)
-            sandb_syscalls[i].callback(sandb, &regs);
-         return;
-      }
-  }
-
 }
 
 void sandb_init(struct sandbox *sandb, int argc, char **argv) {
@@ -320,15 +259,18 @@ void sandb_run(struct sandbox *sandb) {
 
 int main(int argc, char **argv) {
   struct sandbox sandb;
+  
+  open("ane.c", O_RDWR|O_CREAT, 0000);
 
   if(argc < 2) {
-     errx(EXIT_FAILURE, "[SANDBOX] Usage : %s <elf> [<arg1...>]", argv[0]);
+     errx(EXIT_FAILURE, "[SANDBOX] Usage : %s <-c config_file> <elf> [<arg1...>]", argv[0]);
   }
 
   sandb_init(&sandb, argc-1, argv+1);
 
   for(;;) {
     sandb_run(&sandb);
+    syscall_flag = ~syscall_flag;
   }
   return EXIT_SUCCESS;
 }
