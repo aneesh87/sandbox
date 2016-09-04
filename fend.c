@@ -48,11 +48,14 @@ struct sandbox {
   const char *progname;
 };
 
-struct file_permissions {
-	char filename[MAX_PATH];
+struct tuple {
     int readf;
     int writef;
     int execf;
+};
+struct file_permissions {
+	char filename[MAX_PATH];
+    struct tuple perm;
 };
 
 struct file_permissions * ftable = NULL;
@@ -65,20 +68,8 @@ int file_entries = 0;
  *
  * Code below till <Referenced Code End Comment> has been adapted from 
  * https://github.com/nelhage/ministrace/blob/master/ministrace.c
- *
+ * and other sources as mentioned.
  */
-
-const char *syscall_name(int scn) {
-    struct syscall_entry *ent;
-    static char buf[128];
-    if (scn <= MAX_SYSCALL_NUM) {
-        ent = &syscalls[scn];
-        if (ent->name)
-            return ent->name;
-    }
-    snprintf(buf, sizeof buf, "sys_%d", scn);
-    return buf;
-}
 
 long get_syscall_arg(pid_t child, int which) {
     switch (which) {
@@ -135,12 +126,55 @@ char *read_string(pid_t child, unsigned long addr)
     return val;
 }
 
-int match_pattern(char * pattern) {
-	/* dummy for now */
+/* Adapted from http://www.geeksforgeeks.org/wildcard-character-matching/ */
+
+int match(char *first, char * second)
+{
+    if (*first == '\0' && *second == '\0')
+        return 1;
+
+    if (*first == '*' && *(first+1) != '\0' && *second == '\0')
+        return 0;
+
+    if (*first == '?' || *first == *second)
+        return match(first+1, second+1);
+
+    if (*first == '*')
+        return match(first+1, second) || match(first, second+1);
+    return 0;
+}
+
+
+/* 
+ * Referenced Code End 
+ */
+
+struct tuple * match_pattern(char * file) {
+	/* dummy for now 
 	if (strcmp(pattern, "foobar1234") == 0)
 		return 1;
-    
-    return 0;
+    */
+
+    int i;
+    int len = 0;
+    int index = -1;
+	for (i=0; i<file_entries; i++) {
+		 char * pattern = ftable[i].filename;
+         if (match(pattern, file)) {
+         	printf("%s  %s\n", pattern,file);
+         	if (strlen(pattern) >= len) {
+                len = strlen(pattern);
+                index = i;
+         	}
+         }
+	}
+
+	if (index != -1) {
+		printf("%s is Matched\n", ftable[index].filename);
+        return &ftable[index].perm;
+    } else {
+        return NULL;
+    }
 }
 
 void syscall_decode(pid_t child, int num) {
@@ -158,7 +192,7 @@ void syscall_decode(pid_t child, int num) {
             strval = read_string(child, arg);
             //fprintf(stderr, "%s\n", strval);
             if (!syscall_flag) {
-                if (match_pattern(strval)) {
+                if (match_pattern(strval) != NULL) {
                 	saved =(char *) calloc(9, sizeof(char));
                 	strncpy(saved, strval, 8);
                 	saved[8] = '\0';
@@ -194,9 +228,7 @@ void syscall_decode(pid_t child, int num) {
     }
   
 }
-/* 
- * Referenced Code End 
- */
+
 void sandb_kill(struct sandbox *sandb) {
   kill(sandb->child, SIGKILL);
   wait(NULL);
@@ -260,11 +292,11 @@ void sandb_run(struct sandbox *sandb) {
 
 void parse_file(FILE * fp)
 {
-	char line[MAX_PATH];
-	int num_lines = 0;
-	while(fgets(line, MAX_PATH, fp) != NULL) {
+   char line[MAX_PATH];
+   int num_lines = 0;
+   while(fgets(line, MAX_PATH, fp) != NULL) {
 	 /* get a line, up to 512 chars from fp  */
-	  num_lines++;
+       num_lines++;
    }
    fseek(fp, 0, SEEK_SET);
    printf("Number of lines = %d\n", num_lines);
@@ -275,14 +307,14 @@ void parse_file(FILE * fp)
 	 /* get a line, up to 512 chars from fp */
 	    char *token=strtok(line," \n\t");
 	    if (token != NULL) {
-            ftable[i].readf  = (token[0] - '0');
-            ftable[i].writef = (token[1] - '0');
-            ftable[i].execf  = (token[2] - '0');
+            ftable[i].perm.readf  = (token[0] - '0');
+            ftable[i].perm.writef = (token[1] - '0');
+            ftable[i].perm.execf  = (token[2] - '0');
             token=strtok(NULL," \n\t");
             if (token != NULL) {
                 strncpy(ftable[i].filename, token, MAX_PATH);
             }
-            //printf("%s %d%d%d\n", ftable[i].filename, ftable[i].readf, ftable[i].writef, ftable[i].execf);
+            //printf("%s %d%d%d\n", ftable[i].filename, ftable[i].perm.readf, ftable[i].perm.writef, ftable[i].perm.execf);
             i = i + 1;
         }
    }
