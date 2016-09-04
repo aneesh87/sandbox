@@ -27,7 +27,8 @@
 #define offsetof(a, b) __builtin_offsetof(a,b)
 #define get_reg(child, name) __get_reg(child, offsetof(struct user, regs.name))
 
-\
+#define MAX_PATH 512
+
 // globals
 
 // 0 indicates entry and 1 indicates exit
@@ -48,21 +49,21 @@ struct sandbox {
 };
 
 struct file_permissions {
-	char filename[NAME_MAX];
+	char filename[MAX_PATH];
     int readf;
     int writef;
     int execf;
 };
 
+struct file_permissions * ftable = NULL;
 
+int file_entries = 0;
+/* Note: call numbers are in usr/include/x86_64-linux-gnu/asm/unistd_64.h */
 
-
-/* call numbers are in usr/include/x86_64-linux-gnu/asm/unistd_64.h */
-
-/*
+/* IMPORTANT !
  * Referenced Code Start ::
  *
- * Code below till Referenced Code End has been taken from 
+ * Code below till <Referenced Code End Comment> has been adapted from 
  * https://github.com/nelhage/ministrace/blob/master/ministrace.c
  *
  */
@@ -95,7 +96,8 @@ long get_syscall_arg(pid_t child, int which) {
 
 /* edit string adapted from http://www.linuxjournal.com/article/6100?page=0,2 */
 
-void edit_string(pid_t child, unsigned long addr, char * newstr) 
+void edit_string(pid_t child,
+                 unsigned long addr, char * newstr) 
 {
     union u {
             long val;
@@ -135,7 +137,7 @@ char *read_string(pid_t child, unsigned long addr)
 
 int match_pattern(char * pattern) {
 	/* dummy for now */
-	if (strcmp(pattern, "foobar123456789123456789123456789") == 0)
+	if (strcmp(pattern, "foobar1234") == 0)
 		return 1;
     
     return 0;
@@ -145,10 +147,12 @@ void syscall_decode(pid_t child, int num) {
  
     long arg;
     char * strval = NULL;
-
+    
     switch (num) {
    
         case __NR_open:
+        case __NR_stat:
+        case __NR_lstat:
         	
         	arg = get_syscall_arg(child, 0);
             strval = read_string(child, arg);
@@ -167,6 +171,7 @@ void syscall_decode(pid_t child, int num) {
 
                      	edit_string(child, arg, saved);
                      	free(saved);
+                     	saved = NULL;
                      	//fprintf(stderr, "%s %s\n",  saved, read_string(child, arg));
                      	if (get_reg(child, rax) != PERM_DENIED) {
                
@@ -189,13 +194,9 @@ void syscall_decode(pid_t child, int num) {
     }
   
 }
-
-
 /* 
  * Referenced Code End 
  */
-
-
 void sandb_kill(struct sandbox *sandb) {
   kill(sandb->child, SIGKILL);
   wait(NULL);
@@ -257,6 +258,38 @@ void sandb_run(struct sandbox *sandb) {
 
 }
 
+void parse_file(FILE * fp)
+{
+	char line[MAX_PATH];
+	int num_lines = 0;
+	while(fgets(line, MAX_PATH, fp) != NULL) {
+	 /* get a line, up to 512 chars from fp  */
+	  num_lines++;
+   }
+   fseek(fp, 0, SEEK_SET);
+   printf("Number of lines = %d\n", num_lines);
+   ftable = (struct file_permissions *)
+            calloc(num_lines, sizeof(struct file_permissions)); 
+   int i = 0;	
+   while(fgets(line, MAX_PATH, fp) != NULL) {
+	 /* get a line, up to 512 chars from fp */
+	    char *token=strtok(line," \n\t");
+	    if (token != NULL) {
+            ftable[i].readf  = (token[0] - '0');
+            ftable[i].writef = (token[1] - '0');
+            ftable[i].execf  = (token[2] - '0');
+            token=strtok(NULL," \n\t");
+            if (token != NULL) {
+                strncpy(ftable[i].filename, token, MAX_PATH);
+            }
+            //printf("%s %d%d%d\n", ftable[i].filename, ftable[i].readf, ftable[i].writef, ftable[i].execf);
+            i = i + 1;
+        }
+   }
+   file_entries = i;
+   //printf("File Enteries = %d", i);
+   return;
+}
 int main(int argc, char **argv) {
   struct sandbox sandb;
   char path[4096];
@@ -270,7 +303,7 @@ int main(int argc, char **argv) {
 
   if (strcmp(argv[1],"-c") == 0) {
   	  if (argc < 3)
-  	  	  errx(EXIT_FAILURE, "config file expected with -c");
+  	  	  errx(EXIT_FAILURE, "Must provide a config file.");
       fp = fopen(argv[2], "r");
       if (fp == NULL) {
           errx(EXIT_FAILURE, "Unable to open config file");
@@ -283,11 +316,11 @@ int main(int argc, char **argv) {
            strcat(path,"/.fendrc");
        	   fp = fopen(path,"r");
        	   if (fp == NULL)
-       	   	errx(EXIT_FAILURE, " config file expected to be provided");
+       	   	errx(EXIT_FAILURE, "Must provide a config file.");
        }
        sandb_init(&sandb, argc-1, argv+1);
   }
-
+  parse_file(fp);
   for(;;) {
     sandb_run(&sandb);
     syscall_flag = ~syscall_flag;
