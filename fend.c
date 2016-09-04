@@ -15,8 +15,6 @@
 #include <sys/time.h>
 #include <sys/types.h>
 #include <sys/reg.h>
-#include "syscalls.h"
-#include "syscallents.h"
 #include <assert.h>
 #include <limits.h>
 #include <fcntl.h>
@@ -159,22 +157,21 @@ struct tuple * match_pattern(char * file) {
     int len = 0;
     int index = -1;
 	for (i=0; i<file_entries; i++) {
-		 char * pattern = ftable[i].filename;
-         if (match(pattern, file)) {
-         	printf("%s  %s\n", pattern,file);
-         	if (strlen(pattern) >= len) {
-                len = strlen(pattern);
-                index = i;
-         	}
-         }
+		char * pattern = ftable[i].filename;
+		if (match(pattern, file)) {
+			//printf("%s  %s\n", pattern,file);
+			if (strlen(pattern) >= len) {
+				len = strlen(pattern);
+				index = i;
+			}
+		}
 	}
-
 	if (index != -1) {
 		printf("%s is Matched\n", ftable[index].filename);
-        return &ftable[index].perm;
-    } else {
-        return NULL;
-    }
+		return &ftable[index].perm;
+	} else {
+		return NULL;
+	}
 }
 
 void syscall_decode(pid_t child, int num) {
@@ -307,16 +304,16 @@ void parse_file(FILE * fp)
 	 /* get a line, up to 512 chars from fp */
 	    char *token=strtok(line," \n\t");
 	    if (token != NULL) {
-            ftable[i].perm.readf  = (token[0] - '0');
-            ftable[i].perm.writef = (token[1] - '0');
-            ftable[i].perm.execf  = (token[2] - '0');
-            token=strtok(NULL," \n\t");
-            if (token != NULL) {
-                strncpy(ftable[i].filename, token, MAX_PATH);
-            }
-            //printf("%s %d%d%d\n", ftable[i].filename, ftable[i].perm.readf, ftable[i].perm.writef, ftable[i].perm.execf);
-            i = i + 1;
-        }
+	    	ftable[i].perm.readf  = (token[0] - '0');
+	    	ftable[i].perm.writef = (token[1] - '0');
+	    	ftable[i].perm.execf  = (token[2] - '0');
+	    	token=strtok(NULL," \n\t");
+	    	if (token != NULL) {
+	    		strncpy(ftable[i].filename, token, MAX_PATH);
+	    	}
+	    	//printf("%s %d%d%d\n", ftable[i].filename, ftable[i].perm.readf, ftable[i].perm.writef, ftable[i].perm.execf);
+	    	i = i + 1;
+	    }
    }
    file_entries = i;
    //printf("File Enteries = %d", i);
