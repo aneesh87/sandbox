@@ -259,14 +259,34 @@ void sandb_run(struct sandbox *sandb) {
 
 int main(int argc, char **argv) {
   struct sandbox sandb;
-  
+  char path[4096];
+  FILE * fp;
+
   open("ane.c", O_RDWR|O_CREAT, 0000);
 
   if(argc < 2) {
      errx(EXIT_FAILURE, "[SANDBOX] Usage : %s <-c config_file> <elf> [<arg1...>]", argv[0]);
   }
 
-  sandb_init(&sandb, argc-1, argv+1);
+  if (strcmp(argv[1],"-c") == 0) {
+  	  if (argc < 3)
+  	  	  errx(EXIT_FAILURE, "config file expected with -c");
+      fp = fopen(argv[2], "r");
+      if (fp == NULL) {
+          errx(EXIT_FAILURE, "Unable to open config file");
+      }
+      sandb_init(&sandb, argc-3, argv+3);
+  } else {
+       fp = fopen(".fendrc", "r");
+       if (fp == NULL) {
+           strcpy(path,getenv("HOME"));
+           strcat(path,"/.fendrc");
+       	   fp = fopen(path,"r");
+       	   if (fp == NULL)
+       	   	errx(EXIT_FAILURE, " config file expected to be provided");
+       }
+       sandb_init(&sandb, argc-1, argv+1);
+  }
 
   for(;;) {
     sandb_run(&sandb);
