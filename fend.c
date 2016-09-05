@@ -156,16 +156,16 @@ struct tuple * match_pattern(char * file) {
     int i;
     int len = 0;
     int index = -1;
-	for (i=0; i<file_entries; i++) {
-		char * pattern = ftable[i].filename;
-		if (match(pattern, file)) {
-			//printf("%s  %s\n", pattern,file);
-			if (strlen(pattern) >= len) {
-				len = strlen(pattern);
-				index = i;
-			}
-		}
-	}
+    for (i=0; i<file_entries; i++) {
+    	char * pattern = ftable[i].filename;
+    	if (match(pattern, file)) {
+    	//printf("%s  %s\n", pattern,file);
+    		if (strlen(pattern) >= len) {
+    			len = strlen(pattern);
+    			index = i;
+    		}
+    	}
+    }
 	if (index != -1) {
 		printf("%s is Matched\n", ftable[index].filename);
 		return &ftable[index].perm;
@@ -176,20 +176,54 @@ struct tuple * match_pattern(char * file) {
 
 void syscall_decode(pid_t child, int num) {
  
-    long arg;
+    long arg;   // address arg
+    long flags;
+    int readf =  0;  // read flag
+    int writef = 0; // write flag
+    int execf =  0;  // exec flag 
     char * strval = NULL;
     
+    /* switch to get address of string argument(s) */
+    switch (num) {
+    	case __NR_open:
+    	case __NR_stat:
+    	case __NR_lstat:
+
+    		arg = get_syscall_arg(child, 0);
+    		break;
+    	default:
+    	    break;
+    }
+    /* switch to get/set flags */ 
+    switch (num) {
+        case __NR_open:
+            flags = get_syscall_arg(child,1) & O_ACCMODE;
+            if (flags == O_RDONLY) {
+            	readf = 1;
+            } else if (flags == O_WRONLY) {
+            	writef = 1;
+            } else { /* O_RDWR */
+            	readf = 1;
+            	writef = 1;
+            }
+            break;
+        default:
+            break;
+    }
+    /* switch to process */
     switch (num) {
    
         case __NR_open:
-        case __NR_stat:
-        case __NR_lstat:
+       // case __NR_stat:
+        //case __NR_lstat:
         	
-        	arg = get_syscall_arg(child, 0);
             strval = read_string(child, arg);
             //fprintf(stderr, "%s\n", strval);
             if (!syscall_flag) {
-                if (match_pattern(strval) != NULL) {
+            	struct tuple * access = match_pattern(strval);
+                if ((access != NULL) && 
+                	((!access->readf && readf) || (!access->writef && writef))) {
+
                 	saved =(char *) calloc(9, sizeof(char));
                 	strncpy(saved, strval, 8);
                 	saved[8] = '\0';
@@ -204,6 +238,7 @@ void syscall_decode(pid_t child, int num) {
                      	free(saved);
                      	saved = NULL;
                      	//fprintf(stderr, "%s %s\n",  saved, read_string(child, arg));
+                     	/*
                      	if (get_reg(child, rax) != PERM_DENIED) {
                
                             struct user_regs_struct regs;
@@ -214,7 +249,7 @@ void syscall_decode(pid_t child, int num) {
 	                     
 	                        if (ptrace(PTRACE_SETREGS, child, 0, &regs) < 0) 
 	                      	    err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
-                        }
+                        }*/
 
                      } 
             }
