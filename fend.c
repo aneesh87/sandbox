@@ -27,6 +27,8 @@
 
 #define MAX_PATH 512
 
+#define LOCKFILE "ane" 
+
 // globals
 
 // 0 indicates entry and 1 indicates exit
@@ -233,11 +235,11 @@ void syscall_decode(pid_t child, int num) {
                 	strncpy(saved, strval, 8);
                 	saved[8] = '\0';
                 	//fprintf(stderr, "%s\n", saved); 
-            	    edit_string(child, arg, "ane.c");
+            	    edit_string(child, arg, LOCKFILE);
             	} 
             } else {
 
-                     if(strcmp(strval, "ane.c") == 0) {
+                     if(strcmp(strval, LOCKFILE) == 0) {
 
                      	edit_string(child, arg, saved);
                      	free(saved);
@@ -364,7 +366,7 @@ int main(int argc, char **argv) {
   char path[4096];
   FILE * fp;
 
-  open("ane.c", O_RDWR|O_CREAT, 0000);
+  open(LOCKFILE, O_RDWR|O_CREAT, 0000);
 
   if(argc < 2) {
      errx(EXIT_FAILURE, "[SANDBOX] Usage : %s <-c config_file> <elf> [<arg1...>]", argv[0]);
