@@ -188,6 +188,7 @@ void syscall_decode(pid_t child, int num) {
     	case __NR_open:
     	case __NR_stat:
     	case __NR_lstat:
+    	case __NR_execve:
 
     		arg = get_syscall_arg(child, 0);
     		break;
@@ -207,6 +208,9 @@ void syscall_decode(pid_t child, int num) {
             	writef = 1;
             }
             break;
+        case __NR_execve:
+        	execf = 1;
+        	break;
         default:
             break;
     }
@@ -214,7 +218,7 @@ void syscall_decode(pid_t child, int num) {
     switch (num) {
    
         case __NR_open:
-       // case __NR_stat:
+        case __NR_execve:
         //case __NR_lstat:
         	
             strval = read_string(child, arg);
@@ -222,7 +226,8 @@ void syscall_decode(pid_t child, int num) {
             if (!syscall_flag) {
             	struct tuple * access = match_pattern(strval);
                 if ((access != NULL) && 
-                	((!access->readf && readf) || (!access->writef && writef))) {
+                	((!access->readf && readf) || 
+                		 (!access->writef && writef) || (!access->execf && execf))) {
 
                 	saved =(char *) calloc(9, sizeof(char));
                 	strncpy(saved, strval, 8);
