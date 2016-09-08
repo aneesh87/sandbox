@@ -225,8 +225,15 @@ void syscall_decode(pid_t child, int num) {
     	case __NR_execve:
     	case __NR_mkdir:
     	case __NR_unlink:
+    	case __NR_rmdir:
     	case __NR_chmod:
-
+    	case __NR_creat:
+    	case __NR_mknod:
+    	case __NR_chown:
+    	case __NR_lchown:
+    	case __NR_readlink:
+    	case __NR_truncate:
+    	
 
     		arg = get_syscall_arg(child, 0);
     		break;
@@ -235,6 +242,10 @@ void syscall_decode(pid_t child, int num) {
     	case __NR_fchmodat:
     	case __NR_utimensat:
         case __NR_unlinkat:
+        case __NR_mkdirat:
+        case __NR_mknodat:
+        case __NR_fchownat:
+        case __NR_readlinkat:
 
     	    arg = get_syscall_arg(child, 1);
             break;
@@ -265,6 +276,10 @@ void syscall_decode(pid_t child, int num) {
             }
             break;
          
+        case __NR_readlink:
+        case __NR_readlinkat:
+            perm_a.readf = 1;
+            break;
 
         case __NR_execve:
         	perm_a.execf = 1;
@@ -276,6 +291,15 @@ void syscall_decode(pid_t child, int num) {
         case __NR_utimensat:
         case __NR_unlink:
         case __NR_unlinkat:
+        case __NR_rmdir:
+        case __NR_mkdirat:
+        case __NR_creat:
+        case __NR_mknod:
+        case __NR_mknodat:
+        case __NR_chown:
+        case __NR_lchown:
+        case __NR_fchownat:
+        case __NR_truncate:
 
             lockf = LOCKCREATE;
             perm_a.writef = 1;
@@ -303,6 +327,17 @@ void syscall_decode(pid_t child, int num) {
         case __NR_utimensat:
         case __NR_unlink:
         case __NR_unlinkat:
+        case __NR_rmdir:
+        case __NR_mkdirat:
+        case __NR_creat:
+        case __NR_mknod:
+        case __NR_mknodat:
+        case __NR_chown:
+        case __NR_lchown:
+        case __NR_fchownat:
+        case __NR_readlink:
+        case __NR_readlinkat:
+        case __NR_truncate:
         //case __NR_lstat:
         	
             strval = read_string(child, arg);
