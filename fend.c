@@ -199,8 +199,8 @@ void hard_eacess(pid_t child) {
                          
            regs.rax = PERM_DENIED;
 	                     
-	       if (ptrace(PTRACE_SETREGS, child, 0, &regs) < 0) 
-	           err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
+	    if (ptrace(PTRACE_SETREGS, child, 0, &regs) < 0) 
+	        err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
     }
 
 }
@@ -209,15 +209,15 @@ void syscall_decode(pid_t child, int num) {
     long arg;   // address arg
     long arg2;  // second argument required for rename
     long flags;
-    int readf =  0;  // read flag
-    int writef = 0; // write flag
-    int execf =  0;  // exec flag
+    
 
     struct tuple perm_a = {0,0,0};
     struct tuple perm_b = {0,0,0}; 
     char * strval = NULL;
+    char * strval2 = NULL;
     char *lockf = LOCKFILE;
     int open_flag_arg = 1; // changes for openat
+    int check_more = 0;
 
     /* switch to get address of string argument(s) */
     switch (num) {
@@ -252,7 +252,8 @@ void syscall_decode(pid_t child, int num) {
     	
     	case __NR_rename:
     	    arg = get_syscall_arg(child, 0);
-    	    arg = get_syscall_arg(child, 1);
+    	    arg2 = get_syscall_arg(child, 1);
+            break;
 
     	default:
     	    break;
@@ -306,7 +307,9 @@ void syscall_decode(pid_t child, int num) {
             break;
 
         case __NR_rename:
-            
+
+            check_more = 1;
+
             perm_a.writef = 1;
             perm_b.writef = 1;
             
@@ -338,9 +341,12 @@ void syscall_decode(pid_t child, int num) {
         case __NR_readlink:
         case __NR_readlinkat:
         case __NR_truncate:
-        //case __NR_lstat:
+        case __NR_rename:
         	
             strval = read_string(child, arg);
+            if (check_more) {
+            	strval2 = read_string(child, arg2);
+            }
             //fprintf(stderr, "%s\n", strval);
             if (!syscall_flag) {
                 if (deny_pattern(strval, perm_a)) {
@@ -350,7 +356,16 @@ void syscall_decode(pid_t child, int num) {
                 	saved[8] = '\0';
                 	//fprintf(stderr, "%s\n", saved); 
             	    edit_string(child, arg, lockf);
-            	} 
+            	
+            	} else if (check_more && deny_pattern(strval2, perm_b)) {
+
+                	    saved =(char *) calloc(9, sizeof(char));
+                	    strncpy(saved, strval2, 8);
+                	    saved[8] = '\0';
+                	    //fprintf(stderr, "%s\n", saved); 
+            	        edit_string(child, arg2, lockf);
+            	}
+
             } else {
 
                     if(strcmp(strval, lockf) == 0) {
@@ -360,12 +375,21 @@ void syscall_decode(pid_t child, int num) {
                        saved = NULL;
                        //fprintf(stderr, "%s %s\n",  saved, read_string(child, arg));
                        hard_eacess(child);
+                    
+                    } else if(check_more && strcmp(strval2, lockf) == 0) {
+
+                       edit_string(child, arg2, saved);
+                       free(saved);
+                       saved = NULL;
+                       //fprintf(stderr, "%s %s\n",  saved, read_string(child, arg));
+                       hard_eacess(child);
                     } 
             }
             free(strval);
-            break;
-        case __NR_rename:
-            break;
+
+            if (check_more && strval2 != NULL) {
+            	free(strval2);
+            }
 
         break;
         default:
