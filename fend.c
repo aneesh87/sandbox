@@ -482,6 +482,10 @@ void parse_file(FILE * fp)
 	    	token=strtok(NULL," \n\t");
 	    	if (token != NULL) {
 	    		strncpy(ftable[i].filename, token, MAX_PATH);
+	    		
+	    		if (ftable[i].filename[strlen(ftable[i].filename) - 1] == '/') {
+	    			strncat(ftable[i].filename,"*", MAX_PATH);
+	    		}
 	    	}
 	    	//printf("%s %d%d%d\n", ftable[i].filename, ftable[i].perm.readf, ftable[i].perm.writef, ftable[i].perm.execf);
 	    	i = i + 1;
