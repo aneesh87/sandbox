@@ -29,6 +29,10 @@
 
 #define LOCKFILE "ane" 
 
+/* Non Existent but protected File */
+
+#define LOCKCREATE "ane/a"
+
 // globals
 
 // 0 indicates entry and 1 indicates exit
@@ -149,7 +153,7 @@ int match(char *first, char * second)
  * Referenced Code End 
  */
 
-struct tuple * match_pattern(char * file) {
+int deny_pattern(char * file, int readf, int writef, int execf) {
 	/* dummy for now 
 	if (strcmp(pattern, "foobar1234") == 0)
 		return 1;
@@ -158,6 +162,7 @@ struct tuple * match_pattern(char * file) {
     int i;
     int len = 0;
     int index = -1;
+    struct tuple perm;
     for (i=0; i<file_entries; i++) {
     	char * pattern = ftable[i].filename;
     	if (match(pattern, file)) {
@@ -170,37 +175,79 @@ struct tuple * match_pattern(char * file) {
     }
 	if (index != -1) {
 		printf("%s is Matched\n", ftable[index].filename);
-		return &ftable[index].perm;
+		perm = ftable[index].perm;
+        
+        if ((!perm.readf && readf) || 
+        	(!perm.writef && writef) || (!perm.execf && execf)) {
+        	return 1;  
+        } else {
+        	return 0;
+        }
+
 	} else {
-		return NULL;
+		return 0;
 	}
 }
 
+void hard_eacess(pid_t child) {
+    
+    if (get_reg(child, rax) != PERM_DENIED) {
+                
+        struct user_regs_struct regs;
+        if(ptrace(PTRACE_GETREGS, child, NULL, &regs) < 0)
+           err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
+                         
+           regs.rax = PERM_DENIED;
+	                     
+	       if (ptrace(PTRACE_SETREGS, child, 0, &regs) < 0) 
+	           err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
+    }
+
+}
 void syscall_decode(pid_t child, int num) {
  
     long arg;   // address arg
+    long arg2;  // second argument required for rename
     long flags;
     int readf =  0;  // read flag
     int writef = 0; // write flag
     int execf =  0;  // exec flag 
     char * strval = NULL;
-    
+    char *lockf = LOCKFILE;
+    int open_flag_arg = 1; // changes for openat
+
     /* switch to get address of string argument(s) */
     switch (num) {
     	case __NR_open:
-    	case __NR_stat:
-    	case __NR_lstat:
     	case __NR_execve:
+    	case __NR_mkdir:
+    	case __NR_chmod:
 
     		arg = get_syscall_arg(child, 0);
     		break;
+
+    	case __NR_openat:
+    	case __NR_fchmodat:
+
+    	    arg = get_syscall_arg(child, 1);
+            break;
+    	
+    	case __NR_rename:
+    	    arg = get_syscall_arg(child, 0);
+    	    arg = get_syscall_arg(child, 1);
+
     	default:
     	    break;
     }
-    /* switch to get/set flags */ 
+    /* switch to get flags and set protected filename */ 
     switch (num) {
+        
+        case __NR_openat:
+            open_flag_arg = 2;
+
         case __NR_open:
-            flags = get_syscall_arg(child,1) & O_ACCMODE;
+
+            flags = get_syscall_arg(child, open_flag_arg) & O_ACCMODE;
             if (flags == O_RDONLY) {
             	readf = 1;
             } else if (flags == O_WRONLY) {
@@ -210,9 +257,18 @@ void syscall_decode(pid_t child, int num) {
             	writef = 1;
             }
             break;
+
         case __NR_execve:
         	execf = 1;
         	break;
+
+        case __NR_mkdir:
+        case __NR_chmod:
+        case __NR_fchmodat:
+
+            lockf = LOCKCREATE;
+            writef = 1;
+        
         default:
             break;
     }
@@ -221,44 +277,33 @@ void syscall_decode(pid_t child, int num) {
    
         case __NR_open:
         case __NR_execve:
+        case __NR_mkdir:
+        case __NR_openat:
+        case __NR_chmod:
+        case __NR_fchmodat:
         //case __NR_lstat:
         	
             strval = read_string(child, arg);
             //fprintf(stderr, "%s\n", strval);
             if (!syscall_flag) {
-            	struct tuple * access = match_pattern(strval);
-                if ((access != NULL) && 
-                	((!access->readf && readf) || 
-                		 (!access->writef && writef) || (!access->execf && execf))) {
+                if (deny_pattern(strval, readf, writef, execf)) {
 
                 	saved =(char *) calloc(9, sizeof(char));
                 	strncpy(saved, strval, 8);
                 	saved[8] = '\0';
                 	//fprintf(stderr, "%s\n", saved); 
-            	    edit_string(child, arg, LOCKFILE);
+            	    edit_string(child, arg, lockf);
             	} 
             } else {
 
-                     if(strcmp(strval, LOCKFILE) == 0) {
+                    if(strcmp(strval, lockf) == 0) {
 
-                     	edit_string(child, arg, saved);
-                     	free(saved);
-                     	saved = NULL;
-                     	//fprintf(stderr, "%s %s\n",  saved, read_string(child, arg));
-                     	/*
-                     	if (get_reg(child, rax) != PERM_DENIED) {
-               
-                            struct user_regs_struct regs;
-                            if(ptrace(PTRACE_GETREGS, child, NULL, &regs) < 0)
-                               err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
-                         
-                            regs.rax = PERM_DENIED;
-	                     
-	                        if (ptrace(PTRACE_SETREGS, child, 0, &regs) < 0) 
-	                      	    err(EXIT_FAILURE, "[SANDBOX] Failed to PTRACE_GETREGS:");
-                        }*/
-
-                     } 
+                       edit_string(child, arg, saved);
+                       free(saved);
+                       saved = NULL;
+                       //fprintf(stderr, "%s %s\n",  saved, read_string(child, arg));
+                       hard_eacess(child);
+                    } 
             }
             free(strval);
             break;
@@ -366,7 +411,8 @@ int main(int argc, char **argv) {
   char path[4096];
   FILE * fp;
 
-  open(LOCKFILE, O_RDWR|O_CREAT, 0000);
+  mkdir(LOCKFILE, 0000);
+// open(LOCKFILE, O_RDWR|O_CREAT, 0000);
 
   if(argc < 2) {
      errx(EXIT_FAILURE, "[SANDBOX] Usage : %s <-c config_file> <elf> [<arg1...>]", argv[0]);
