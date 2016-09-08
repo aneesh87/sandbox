@@ -153,7 +153,7 @@ int match(char *first, char * second)
  * Referenced Code End 
  */
 
-int deny_pattern(char * file, int readf, int writef, int execf) {
+int deny_pattern(char * file, struct tuple sysperm) {
 	/* dummy for now 
 	if (strcmp(pattern, "foobar1234") == 0)
 		return 1;
@@ -174,11 +174,11 @@ int deny_pattern(char * file, int readf, int writef, int execf) {
     	}
     }
 	if (index != -1) {
-		printf("%s is Matched\n", ftable[index].filename);
+		//printf("%s is Matched\n", ftable[index].filename);
 		perm = ftable[index].perm;
         
-        if ((!perm.readf && readf) || 
-        	(!perm.writef && writef) || (!perm.execf && execf)) {
+        if ((!perm.readf && sysperm.readf) || 
+        	(!perm.writef && sysperm.writef) || (!perm.execf && sysperm.execf)) {
         	return 1;  
         } else {
         	return 0;
@@ -211,7 +211,10 @@ void syscall_decode(pid_t child, int num) {
     long flags;
     int readf =  0;  // read flag
     int writef = 0; // write flag
-    int execf =  0;  // exec flag 
+    int execf =  0;  // exec flag
+
+    struct tuple perm_a = {0,0,0};
+    struct tuple perm_b = {0,0,0}; 
     char * strval = NULL;
     char *lockf = LOCKFILE;
     int open_flag_arg = 1; // changes for openat
@@ -221,13 +224,17 @@ void syscall_decode(pid_t child, int num) {
     	case __NR_open:
     	case __NR_execve:
     	case __NR_mkdir:
+    	case __NR_unlink:
     	case __NR_chmod:
+
 
     		arg = get_syscall_arg(child, 0);
     		break;
 
     	case __NR_openat:
     	case __NR_fchmodat:
+    	case __NR_utimensat:
+        case __NR_unlinkat:
 
     	    arg = get_syscall_arg(child, 1);
             break;
@@ -244,31 +251,43 @@ void syscall_decode(pid_t child, int num) {
         
         case __NR_openat:
             open_flag_arg = 2;
-
+        /* Purposely fall through */
         case __NR_open:
 
             flags = get_syscall_arg(child, open_flag_arg) & O_ACCMODE;
             if (flags == O_RDONLY) {
-            	readf = 1;
+            	perm_a.readf = 1;
             } else if (flags == O_WRONLY) {
-            	writef = 1;
+            	perm_a.writef = 1;
             } else { /* O_RDWR */
-            	readf = 1;
-            	writef = 1;
+            	perm_a.readf = 1;
+            	perm_a.writef = 1;
             }
             break;
+         
 
         case __NR_execve:
-        	execf = 1;
+        	perm_a.execf = 1;
         	break;
 
         case __NR_mkdir:
         case __NR_chmod:
         case __NR_fchmodat:
+        case __NR_utimensat:
+        case __NR_unlink:
+        case __NR_unlinkat:
 
             lockf = LOCKCREATE;
-            writef = 1;
-        
+            perm_a.writef = 1;
+            break;
+
+        case __NR_rename:
+            
+            perm_a.writef = 1;
+            perm_b.writef = 1;
+            
+            break;
+
         default:
             break;
     }
@@ -281,12 +300,15 @@ void syscall_decode(pid_t child, int num) {
         case __NR_openat:
         case __NR_chmod:
         case __NR_fchmodat:
+        case __NR_utimensat:
+        case __NR_unlink:
+        case __NR_unlinkat:
         //case __NR_lstat:
         	
             strval = read_string(child, arg);
             //fprintf(stderr, "%s\n", strval);
             if (!syscall_flag) {
-                if (deny_pattern(strval, readf, writef, execf)) {
+                if (deny_pattern(strval, perm_a)) {
 
                 	saved =(char *) calloc(9, sizeof(char));
                 	strncpy(saved, strval, 8);
@@ -307,6 +329,10 @@ void syscall_decode(pid_t child, int num) {
             }
             free(strval);
             break;
+        case __NR_rename:
+            break;
+
+        break;
         default:
             break;
     }
@@ -383,7 +409,7 @@ void parse_file(FILE * fp)
        num_lines++;
    }
    fseek(fp, 0, SEEK_SET);
-   printf("Number of lines = %d\n", num_lines);
+   //printf("Number of lines = %d\n", num_lines);
    ftable = (struct file_permissions *)
             calloc(num_lines, sizeof(struct file_permissions)); 
    int i = 0;	
@@ -410,8 +436,14 @@ int main(int argc, char **argv) {
   struct sandbox sandb;
   char path[4096];
   FILE * fp;
+  char command[50];
 
   mkdir(LOCKFILE, 0000);
+  strncpy(command,"chmod 000 ",50);
+  strncat(command,LOCKFILE,50);
+
+  system(command);
+
 // open(LOCKFILE, O_RDWR|O_CREAT, 0000);
 
   if(argc < 2) {
