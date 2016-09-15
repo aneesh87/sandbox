@@ -1,0 +1,6 @@
+{
+  "name": "A Simple Sandbox Tool",
+  "tagline": "Run a process under the sandbox control, restrict or grant read/write/execute access to files and directories",
+  "body": "### Welcome to Sandbox repository page\r\nThis tool was developed as a course requirement for Operating Systems, CSC 501. \r\n\r\n### Author\r\nAneesh Gupta (agupta27@ncsu.edu)",
+  "note": "Don't delete this file! It's used internally to help with page regeneration."
+}
